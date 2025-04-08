@@ -1,0 +1,8 @@
+# Create a .gitignore file
+echo "__pycache__/" > .gitignore
+echo "*.pyc" >> .gitignore
+echo "venv/" >> .gitignore
+echo "albums/" >> .gitignore
+echo "uploads/" >> .gitignore
+echo "*.db" >> .gitignore
+echo ".DS_Store" >> .gitignore
