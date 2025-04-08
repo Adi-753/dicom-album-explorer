@@ -1,3 +1,5 @@
+# This will make all the directories for the project.
+
 import os
 
 structure = {
