@@ -1,4 +1,4 @@
-# This will make all the directories for the project.
+# This will make all the directories and files for the project.
 
 import os
 
