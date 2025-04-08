@@ -1,0 +1,10 @@
+flask>=2.0.1
+pydicom>=2.3.0
+pandas>=2.0.0
+pillow>=8.3.2
+flask-wtf>=0.15.1
+werkzeug>=2.0.1
+numpy>=1.22.0
+sqlalchemy>=1.4.23
+matplotlib>=3.4.3
+shortuuid>=1.0.1

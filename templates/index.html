@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DICOM Album Explorer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">DICOM Album Explorer</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/advanced_query">Advanced Query</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h2>Welcome to DICOM Album Explorer</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="lead">
+                            This application allows you to organize and share DICOM images by creating shareable albums.
+                            Upload your DICOM files or scan a local directory to get started.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Upload DICOM Files</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="uploadForm" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="files" class="form-label">Select DICOM Files</label>
+                                <input type="file" class="form-control" id="files" name="files[]" multiple accept=".dcm">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Upload Files</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Scan Directory</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="scanForm">
+                            <div class="mb-3">
+                                <label for="directory" class="form-label">Directory Path</label>
+                                <input type="text" class="form-control" id="directory" name="directory" placeholder="/path/to/dicom/files">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Scan Directory</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="dataSection" style="display: none;">
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card mb-4">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h3>DICOM Metadata</h3>
+                            <span id="fileCount" class="badge bg-primary"></span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="metadataTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient ID</th>
+                                            <th>Patient Name</th>
+                                            <th>Modality</th>
+                                            <th>Study Date</th>
+                                            <th>Series Description</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Will be populated by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h3>Simple Query</h3>
+                        </div>
+                        <div class="card-body">
+                            <form id="simpleQueryForm">
+                                <div class="mb-3">
+                                    <label for="queryField" class="form-label">Field</label>
+                                    <select class="form-select" id="queryField" name="field">
+                                        <!-- Will be populated by JavaScript -->
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="queryOperator" class="form-label">Operator</label>
+                                    <select class="form-select" id="queryOperator" name="operator">
+                                        <option value="=">Equals (=)</option>
+                                        <option value="!=">Not Equals (!=)</option>
+                                        <option value=">">Greater Than (>)</option>
+                                        <option value="<">Less Than (<)</option>
+                                        <option value=">=">Greater or Equal (>=)</option>
+                                        <option value="<=">Less or Equal (<=)</option>
+                                        <option value="contains">Contains</option>
+                                        <option value="starts_with">Starts With</option>
+                                        <option value="ends_with">Ends With</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="queryValue" class="form-label">Value</label>
+                                    <input type="text" class="form-control" id="queryValue" name="value">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Run Query</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h3>Create Album</h3>
+                        </div>
+                        <div class="card-body">
+                            <form id="createAlbumForm">
+                                <div class="mb-3">
+                                    <label for="albumName" class="form-label">Album Name</label>
+                                    <input type="text" class="form-control" id="albumName" name="name" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="albumDescription" class="form-label">Description</label>
+                                    <textarea class="form-control" id="albumDescription" name="description" rows="3"></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="albumCreator" class="form-label">Creator</label>
+                                    <input type="text" class="form-control" id="albumCreator" name="creator" value="Anonymous">
+                                </div>
+                                <input type="hidden" id="queryJson" name="query_json">
+                                <button type="submit" class="btn btn-success" disabled id="createAlbumBtn">Create Album from Query Results</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card mb-4">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h3>Query Results</h3>
+                            <span id="resultCount" class="badge bg-success"></span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="resultsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Patient ID</th>
+                                            <th>Patient Name</th>
+                                            <th>Modality</th>
+                                            <th>Study Date</th>
+                                            <th>Series Description</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Will be populated by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Your Albums</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if albums %}
+                            <div class="row">
+                                {% for album in albums %}
+                                    <div class="col-md-4 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <h5 class="card-title">{{ album.name }}</h5>
+                                                <p class="card-text">{{ album.description }}</p>
+                                                <p><small class="text-muted">Created by: {{ album.creator }}</small></p>
+                                                <p><small class="text-muted">Files: {{ album.file_count }}</small></p>
+                                            </div>
+                                            <div class="card-footer">
+                                                <a href="{{ album.share_url }}" class="btn btn-primary">View Album</a>
+                                                <button class="btn btn-outline-danger float-end delete-album" data-album-id="{{ album.id }}">Delete</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p>No albums created yet. Use the form above to create your first album.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

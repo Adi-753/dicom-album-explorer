@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ album.name }} - DICOM Album</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">DICOM Album Explorer</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/advanced_query">Advanced Query</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h2>{{ album.name }}</h2>
+                    </div>
+                    <div class="card-body">
+                        <p class="lead">{{ album.description }}</p>
+                        <p>
+                            <strong>Created by:</strong> {{ album.creator }}<br>
+                            <strong>Date created:</strong> {{ album.created_date }}<br>
+                            <strong>Number of files:</strong> {{ album.file_count }}
+                        </p>
+                        <div class="d-flex">
+                            <button class="btn btn-primary me-2" onclick="copyShareLink()">Copy Share Link</button>
+                            <a href="/" class="btn btn-secondary">Back to Home</a>
+                            <button class="btn btn-danger ms-auto delete-album" data-album-id="{{ album.id }}">Delete Album</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Files in Album</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group" id="filesList">
+                            {% for file in files %}
+                                <button type="button" class="list-group-item list-group-item-action file-item" 
+                                        data-index="{{ loop.index0 }}">
+                                    {% if file.SeriesDescription %}
+                                        {{ file.SeriesDescription }}
+                                    {% elif file.StudyDescription %}
+                                        {{ file.StudyDescription }}
+                                    {% else %}
+                                        Image {{ loop.index }}
+                                    {% endif %}
+                                    <br>
+                                    <small class="text-muted">
+                                        {% if file.PatientName %}Patient: {{ file.PatientName }}{% endif %}
+                                        {% if file.Modality %} | {{ file.Modality }}{% endif %}
+                                    </small>
+                                </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Image Viewer</h3>
+                    </div>
+                    <div class="card-body text-center">
+                        <div id="imageContainer">
+                            <p class="text-muted" id="selectPrompt">Select a file from the list to view</p>
+                            <img id="dicomImage" class="img-fluid" style="display: none;">
+                        </div>
+                        
+                        <div class="mt-3" id="viewerControls" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="input-group mb-3">
+                                        <span class="input-group-text">Window Center</span>
+                                        <input type="number" class="form-control" id="windowCenter">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="input-group mb-3">
+                                        <span class="input-group-text">Window Width</span>
+                                        <input type="number" class="form-control" id="windowWidth">
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary me-2" id="applyWindowing">Apply Windowing</button>
+                            <a id="downloadLink" class="btn btn-success" download>Download DICOM</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4" id="metadataCard" style="display: none;">
+                    <div class="card-header">
+                        <h3>Image Metadata</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="metadataTable">
+                                <thead>
+                                    <tr>
+                                        <th>Attribute</th>
+                                        <th>Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentFileIndex = null;
+        const albumId = "{{ album.id }}";
+        // Store file data from server
+        const fileData = {{ files|tojson }};
+
+        $(document).ready(function() {
+            // File selection
+            $('.file-item').click(function() {
+                $('.file-item').removeClass('active');
+                $(this).addClass('active');
+                
+                const fileIndex = $(this).data('index');
+                currentFileIndex = fileIndex;
+                
+                loadDicomImage(fileIndex);
+                
+                $('#downloadLink').attr('href', `/album/${albumId}/file/${fileIndex}/download`);
+                
+                $('#selectPrompt').hide();
+                $('#dicomImage').show();
+                $('#viewerControls').show();
+                $('#metadataCard').show();
+                
+                populateMetadataTable(fileIndex);
+            });
+            
+            $('#applyWindowing').click(function() {
+                if (currentFileIndex !== null) {
+                    const windowCenter = $('#windowCenter').val();
+                    const windowWidth = $('#windowWidth').val();
+                    loadDicomImage(currentFileIndex, windowCenter, windowWidth);
+                }
+            });
+            
+            $('.delete-album').click(function() {
+                if (confirm('Are you sure you want to delete this album? This action cannot be undone.')) {
+                    const albumId = $(this).data('album-id');
+                    $.post(`/album/${albumId}/delete`, function(response) {
+                        if (response.success && response.redirect) {
+                            window.location.href = response.redirect;
+                        } else {
+                            alert('Failed to delete album');
+                        }
+                    });
+                }
+            });
+        });
+        
+        function loadDicomImage(fileIndex, windowCenter = null, windowWidth = null) {
+            let url = `/album/${albumId}/image/${fileIndex}`;
+            
+            if (windowCenter && windowWidth) {
+                url += `?windowCenter=${windowCenter}&windowWidth=${windowWidth}`;
+            }
+            
+            $.getJSON(url, function(response) {
+                if (response.success) {
+                    $('#dicomImage').attr('src', response.image_data);
+                } else {
+                    alert('Error loading image: ' + response.error);
+                }
+            });
+        }
+        
+        function populateMetadataTable(fileIndex) {
+            const file = fileData[fileIndex];
+            console.log("Populating metadata for file index:", fileIndex);
+            console.log("File data:", file);
+            
+            if (file) {
+                const metadataTable = $('#metadataTable tbody');
+                metadataTable.empty();
+                
+                const priorityFields = ['PatientName', 'PatientID', 'StudyDate', 'Modality', 
+                                      'StudyDescription', 'SeriesDescription'];
+                
+                priorityFields.forEach(field => {
+                    if (file[field]) {
+                        metadataTable.append(`
+                            <tr>
+                                <td>${field}</td>
+                                <td>${file[field]}</td>
+                            </tr>
+                        `);
+                    }
+                });
+                
+                Object.keys(file).sort().forEach(field => {
+                    if (!priorityFields.includes(field) && file[field] && 
+                        field !== 'FilePath' && field !== 'AlbumFilePath' && 
+                        field !== 'OriginalFilePath' && field !== 'id') {
+                        metadataTable.append(`
+                            <tr>
+                                <td>${field}</td>
+                                <td>${file[field]}</td>
+                            </tr>
+                        `);
+                    }
+                });
+            } else {
+                console.error("File data not found for index:", fileIndex);
+                $('#metadataTable tbody').html(`
+                    <tr>
+                        <td colspan="2" class="text-center text-danger">
+                            Error: Could not load metadata for this file
+                        </td>
+                    </tr>
+                `);
+            }
+        }
+        
+        function copyShareLink() {
+            const shareUrl = window.location.href;
+            navigator.clipboard.writeText(shareUrl).then(function() {
+                alert('Share link copied to clipboard!');
+            }, function() {
+                alert('Failed to copy link. Please copy the URL from your browser address bar.');
+            });
+        }
+    </script>
+</body>
+</html>
