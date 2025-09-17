@@ -1,10 +1,26 @@
+# Core Flask dependencies
 flask>=2.0.1
-pydicom>=2.3.0
-pandas>=2.0.0
-pillow>=8.3.2
-flask-wtf>=0.15.1
 werkzeug>=2.0.1
+flask-wtf>=0.15.1
+python-dotenv>=1.0.0
+
+# DICOM processing
+pydicom>=2.3.0
+pillow>=8.3.2
 numpy>=1.22.0
-sqlalchemy>=1.4.23
 matplotlib>=3.4.3
+pandas>=2.0.0
+
+# Database
+sqlalchemy>=1.4.23
+psycopg2-binary>=2.9.0
+
+# Authentication
+flask-login>=0.6.0
+flask-bcrypt>=0.7.1
+
+# Utilities
 shortuuid>=1.0.1
+
+# Production server
+gunicorn>=20.1.0

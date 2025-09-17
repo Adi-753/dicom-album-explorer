@@ -18,7 +18,7 @@ class AlbumManager:
         self.db_manager = db_manager
         os.makedirs(base_dir, exist_ok=True)
     
-    def create_album(self, name, description, creator, file_paths=None, query_results=None):
+    def create_album(self, name, description, creator, file_paths=None, query_results=None, owner_id=None, is_public=False):
         """
         Create a new album with the provided DICOM files
         
@@ -28,6 +28,8 @@ class AlbumManager:
         - creator: User who created the album
         - file_paths: List of paths to DICOM files to include
         - query_results: DataFrame with query results including FilePath column
+        - owner_id: ID of the user who owns this album
+        - is_public: Whether the album is publicly shareable
         
         Returns:
         - album_id: Unique ID for the created album
@@ -72,7 +74,9 @@ class AlbumManager:
             'creator': creator,
             'created_date': datetime.now().isoformat(),
             'file_count': len(file_metadata),
-            'share_url': f"/album/{album_id}"
+            'share_url': f"/album/{album_id}",
+            'owner_id': owner_id,
+            'is_public': is_public
         }
         
         with open(os.path.join(album_dir, 'metadata.json'), 'w') as f:
@@ -112,7 +116,11 @@ class AlbumManager:
         return None
     
     def get_all_albums(self):
-        """Get a list of all albums"""
+        """Get a list of all albums (using database for faster retrieval)"""
+        if self.db_manager:
+            return self.db_manager.get_all_albums()
+        
+        # Fallback to file-based retrieval if no database manager
         albums = []
         
         if not os.path.exists(self.base_dir):
@@ -129,6 +137,78 @@ class AlbumManager:
         albums.sort(key=lambda x: x.get('created_date', ''), reverse=True)
         
         return albums
+        
+    def get_user_albums(self, user_id):
+        """Get albums owned by a specific user"""
+        if self.db_manager:
+            return self.db_manager.get_user_albums(user_id)
+        
+        # Fallback if no database manager
+        all_albums = self.get_all_albums()
+        user_albums = [album for album in all_albums if album.get('owner_id') == user_id]
+        return user_albums
+    
+    def get_public_albums(self):
+        """Get all public albums"""
+        if self.db_manager:
+            return self.db_manager.get_public_albums()
+        
+        # Fallback if no database manager
+        all_albums = self.get_all_albums()
+        public_albums = [album for album in all_albums if album.get('is_public', False)]
+        return public_albums
+        
+    def toggle_album_public_status(self, album_id, is_public=None):
+        """Toggle or set the public status of an album"""
+        album = self.get_album_metadata(album_id)
+        if not album:
+            return False
+        
+        # If is_public not provided, toggle current status
+        if is_public is None:
+            is_public = not album.get('is_public', False)
+        
+        # Update album metadata
+        album['is_public'] = is_public
+        
+        # Save to file
+        album_dir = os.path.join(self.base_dir, album_id)
+        metadata_path = os.path.join(album_dir, 'metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(album, f, indent=2)
+        
+        # Update database if available
+        if self.db_manager:
+            self.db_manager.update_album_public_status(album_id, is_public)
+        
+        return True
+    
+    def generate_share_link(self, album_id, base_url=''):
+        """Generate a shareable link for an album"""
+        album = self.get_album_metadata(album_id)
+        if not album:
+            return None
+        
+        # Set public status to true for sharing
+        self.toggle_album_public_status(album_id, True)
+        
+        # Generate shareable URL
+        share_url = f"{base_url}/album/{album_id}"
+        
+        # Update album metadata
+        album['share_url'] = share_url
+        
+        # Save to file
+        album_dir = os.path.join(self.base_dir, album_id)
+        metadata_path = os.path.join(album_dir, 'metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(album, f, indent=2)
+        
+        # Update database if available
+        if self.db_manager:
+            self.db_manager.update_album_share_url(album_id, share_url)
+        
+        return share_url
     
     def delete_album(self, album_id):
         """Delete an album"""

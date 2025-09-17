@@ -1,26 +1,97 @@
 import os
 import json
 import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, flash
 from werkzeug.utils import secure_filename
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from dotenv import load_dotenv
 
 from utils.dicom_processor import DICOMProcessor
 from utils.album_manager import AlbumManager
 from utils.query_engine import QueryEngine
 from database.db import DatabaseManager
+from auth import AuthManager, User, auth_required, owner_required
+from config import config
+from cloud_storage import storage_manager
+import logging
+from logging.handlers import RotatingFileHandler
 
+# Load environment variables
+load_dotenv()
+
+# Create Flask app with configuration
+config_name = os.environ.get('FLASK_ENV', 'development')
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['ALLOWED_EXTENSIONS'] = {'dcm'}
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max upload
-app.secret_key = 'dicom_album_explorer_key'
+app.config.from_object(config[config_name])
+config[config_name].init_app(app)
+
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+
+# Configure logging
+if not app.debug and config_name == 'production':
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+    
+    file_handler = RotatingFileHandler('logs/dicom_explorer.log', maxBytes=10240000, backupCount=10)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('DICOM Album Explorer startup')
+
+# Initialize cloud storage
+storage_manager.init_app(app)
 
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Ensure directories exist (backwards compatibility)
+if not app.config.get('USE_CLOUD_STORAGE', False):
+    os.makedirs(app.config.get('UPLOAD_FOLDER', 'uploads'), exist_ok=True)
+    os.makedirs(app.config.get('ALBUMS_FOLDER', 'albums'), exist_ok=True)
 
-db_manager = DatabaseManager()
-
+# Initialize database and managers
+db_manager = DatabaseManager(app.config.get('DATABASE_URL'))
+auth_manager = AuthManager(db_manager)
 album_manager = AlbumManager(db_manager=db_manager)
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user for Flask-Login"""
+    return auth_manager.get_user_by_id(user_id)
+
+# Error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    """Handle 404 errors"""
+    return render_template('error.html', 
+                         message='Page not found', 
+                         error_code=404), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    app.logger.error(f'Internal server error: {error}')
+    return render_template('error.html', 
+                         message='Internal server error', 
+                         error_code=500), 500
+
+@app.errorhandler(403)
+def access_denied(error):
+    """Handle 403 errors"""
+    return render_template('error.html', 
+                         message='Access denied', 
+                         error_code=403), 403
+
+@app.errorhandler(413)
+def file_too_large(error):
+    """Handle file upload size errors"""
+    return jsonify({'error': 'File too large. Maximum size is 100MB.'}), 413
 
 current_dicom_data = None
 
@@ -28,13 +99,85 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
+# Authentication routes
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """User login"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        remember_me = bool(request.form.get('remember_me'))
+        
+        user, message = auth_manager.authenticate_user(username, password)
+        
+        if user:
+            login_user(user, remember=remember_me)
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('index'))
+        else:
+            flash(message, 'error')
+    
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    """User registration"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        
+        # Validate passwords match
+        if password != confirm_password:
+            flash('Passwords do not match', 'error')
+            return render_template('register.html')
+        
+        # Validate password strength
+        if len(password) < 6:
+            flash('Password must be at least 6 characters long', 'error')
+            return render_template('register.html')
+        
+        success, message = auth_manager.register_user(username, email, password)
+        
+        if success:
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash(message, 'error')
+    
+    return render_template('register.html')
+
+@app.route('/logout')
+def logout():
+    """User logout"""
+    logout_user()
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('index'))
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for deployment platforms"""
+    return jsonify({"status": "healthy", "app": "DICOM Album Explorer"}), 200
+
 @app.route('/')
 def index():
     """Main page with options to upload files or scan directory"""
-    albums = album_manager.get_all_albums()
-    return render_template('index.html', albums=albums)
+    if app.config.get('ENABLE_USER_AUTH', True):
+        if current_user.is_authenticated:
+            # Show user's albums only
+            albums = album_manager.get_user_albums(current_user.id)
+        else:
+            # Show public albums only
+            albums = album_manager.get_public_albums()
+    else:
+        # Show all albums when auth is disabled
+        albums = album_manager.get_all_albums()
+    
+    return render_template('index.html', albums=albums, user=current_user if current_user.is_authenticated else None)
 
 @app.route('/upload', methods=['POST'])
+@auth_required
 def upload_files():
     """Handle file uploads"""
     if 'files[]' not in request.files:
@@ -78,6 +221,7 @@ def upload_files():
         return jsonify({'error': 'Could not process uploaded files'}), 400
 
 @app.route('/scan', methods=['POST'])
+@auth_required
 def scan_directory():
     """Scan directory for DICOM files"""
     directory = request.form.get('directory')
@@ -179,6 +323,7 @@ def advanced_query():
         return jsonify({'error': f'Query error: {str(e)}'}), 400
 
 @app.route('/create_album', methods=['POST'])
+@auth_required
 def create_album():
     """Create album from query results"""
     global current_dicom_data
@@ -188,14 +333,20 @@ def create_album():
     
     name = request.form.get('name')
     description = request.form.get('description', '')
-    creator = request.form.get('creator', 'Anonymous')
+    # Use current user as creator if authenticated
+    if current_user.is_authenticated:
+        creator = current_user.username
+        owner_id = current_user.id
+    else:
+        creator = request.form.get('creator', 'Anonymous')
+        owner_id = None
     
     selected_files = request.form.getlist('selected_files')
     query_json = request.form.get('query_json')
     
     if selected_files:
         file_paths = selected_files
-        album_id = album_manager.create_album(name, description, creator, file_paths=file_paths)
+        album_id = album_manager.create_album(name, description, creator, file_paths=file_paths, owner_id=owner_id)
     elif query_json:
         try:
             query_data = json.loads(query_json)
@@ -204,7 +355,7 @@ def create_album():
             
             query_results = QueryEngine.advanced_query(current_dicom_data, conditions, join_operator)
             
-            album_id = album_manager.create_album(name, description, creator, query_results=query_results)
+            album_id = album_manager.create_album(name, description, creator, query_results=query_results, owner_id=owner_id)
         except Exception as e:
             return jsonify({'error': f'Error creating album: {str(e)}'}), 400
     else:
@@ -280,6 +431,7 @@ def download_dicom_file(album_id, file_index):
     )
 
 @app.route('/album/<album_id>/delete', methods=['POST'])
+@owner_required
 def delete_album(album_id):
     """Delete an album"""
     success = album_manager.delete_album(album_id)
@@ -310,6 +462,46 @@ def advanced_query_page():
         fields.remove('FilePath') if 'FilePath' in fields else None
     
     return render_template('advanced_query.html', fields=fields)
+
+# Sharing routes
+@app.route('/album/<album_id>/share', methods=['POST'])
+@owner_required
+def share_album(album_id):
+    """Generate a shareable link for an album"""
+    if not app.config.get('ENABLE_SHARING', True):
+        return jsonify({'error': 'Sharing is not enabled'}), 403
+    
+    base_url = request.url_root.rstrip('/')
+    share_url = album_manager.generate_share_link(album_id, base_url)
+    
+    if share_url:
+        return jsonify({
+            'success': True,
+            'share_url': share_url,
+            'message': 'Album is now publicly shareable!'
+        })
+    else:
+        return jsonify({'error': 'Failed to generate share link'}), 500
+
+@app.route('/album/<album_id>/toggle-public', methods=['POST'])
+@owner_required
+def toggle_album_public(album_id):
+    """Toggle the public status of an album"""
+    if not app.config.get('ENABLE_SHARING', True):
+        return jsonify({'error': 'Sharing is not enabled'}), 403
+    
+    is_public = request.json.get('is_public') if request.is_json else None
+    success = album_manager.toggle_album_public_status(album_id, is_public)
+    
+    if success:
+        album = album_manager.get_album_metadata(album_id)
+        return jsonify({
+            'success': True,
+            'is_public': album.get('is_public', False),
+            'message': f'Album is now {"public" if album.get("is_public", False) else "private"}'
+        })
+    else:
+        return jsonify({'error': 'Failed to update album status'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
