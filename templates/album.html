@@ -143,8 +143,8 @@
         let currentFileIndex = null;
         const albumId = "{{ album.id }}";
         // Store file data from server
-        const fileData = {{ files|tojson }};
-
+        const fileData = JSON.parse('{{ files|tojson | safe }}');
+        
         $(document).ready(function() {
             // File selection
             $('.file-item').click(function() {
