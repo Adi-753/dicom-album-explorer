@@ -3,11 +3,17 @@ Cloud storage integration for DICOM Album Explorer
 """
 
 import os
-import boto3
 import uuid
 from datetime import datetime, timedelta
-from botocore.exceptions import ClientError, NoCredentialsError
 from flask import current_app
+
+# Only import boto3 if needed to avoid deployment issues
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
 
 class CloudStorage:
     """Base class for cloud storage providers"""
@@ -36,6 +42,9 @@ class S3Storage(CloudStorage):
     """Amazon S3 storage implementation"""
     
     def __init__(self, bucket_name, region='us-east-1', access_key=None, secret_key=None):
+        if not BOTO3_AVAILABLE:
+            raise ImportError("boto3 is required for S3 storage but not installed")
+            
         self.bucket_name = bucket_name
         self.region = region
         
@@ -150,17 +159,27 @@ class CloudStorageManager:
         if not app.config.get('USE_CLOUD_STORAGE', False):
             return
         
+        # Check if boto3 is available
+        if not BOTO3_AVAILABLE:
+            app.logger.warning("Cloud storage requested but boto3 not installed. Using local storage.")
+            return
+        
         # Configure S3 storage
         bucket_name = app.config.get('AWS_S3_BUCKET')
         if not bucket_name:
-            raise ValueError("AWS_S3_BUCKET configuration is required for cloud storage")
+            app.logger.warning("AWS_S3_BUCKET not configured. Using local storage.")
+            return
         
-        self.storage = S3Storage(
-            bucket_name=bucket_name,
-            region=app.config.get('AWS_S3_REGION', 'us-east-1'),
-            access_key=app.config.get('AWS_ACCESS_KEY_ID'),
-            secret_key=app.config.get('AWS_SECRET_ACCESS_KEY')
-        )
+        try:
+            self.storage = S3Storage(
+                bucket_name=bucket_name,
+                region=app.config.get('AWS_S3_REGION', 'us-east-1'),
+                access_key=app.config.get('AWS_ACCESS_KEY_ID'),
+                secret_key=app.config.get('AWS_SECRET_ACCESS_KEY')
+            )
+        except Exception as e:
+            app.logger.error(f"Failed to initialize cloud storage: {e}")
+            app.logger.info("Falling back to local storage")
     
     def upload_dicom_file(self, file_path, album_id, filename):
         """Upload a DICOM file to cloud storage"""
