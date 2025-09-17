@@ -33,8 +33,7 @@ login_manager.login_message = 'Please log in to access this page.'
 
 # Configure logging
 if not app.debug and config_name == 'production':
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
+    os.makedirs('logs', exist_ok=True)
     
     file_handler = RotatingFileHandler('logs/dicom_explorer.log', maxBytes=10240000, backupCount=10)
     file_handler.setFormatter(logging.Formatter(

@@ -397,7 +397,10 @@ class DatabaseManager:
     def get_public_albums(self):
         """Get all public albums"""
         with self.get_connection() as conn:
-            query = 'SELECT * FROM albums WHERE is_public = 1 ORDER BY created_date DESC'
+            if self.db_type == 'sqlite':
+                query = 'SELECT * FROM albums WHERE is_public = 1 ORDER BY created_date DESC'
+            else:
+                query = 'SELECT * FROM albums WHERE is_public = TRUE ORDER BY created_date DESC'
             df = pd.read_sql_query(query, conn)
             
             return df.to_dict('records') if not df.empty else []
@@ -407,10 +410,10 @@ class DatabaseManager:
         with self.get_connection() as conn:
             if self.db_type == 'sqlite':
                 cursor = conn.cursor()
-                cursor.execute('UPDATE albums SET is_public = ? WHERE id = ?', (is_public, album_id))
+                cursor.execute('UPDATE albums SET is_public = ? WHERE id = ?', (1 if is_public else 0, album_id))
             else:
                 conn.execute(text('UPDATE albums SET is_public = :is_public WHERE id = :album_id'), 
-                           {'is_public': is_public, 'album_id': album_id})
+                           {'is_public': bool(is_public), 'album_id': album_id})
                 conn.commit()
     
     def update_album_share_url(self, album_id, share_url):
